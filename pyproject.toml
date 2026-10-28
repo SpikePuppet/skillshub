@@ -14,3 +14,6 @@ skillhub = "skillhub.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["skillhub*"]
+
+[tool.setuptools.package-data]
+skillhub = ["web/*"]

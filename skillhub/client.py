@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -54,6 +55,51 @@ def lock(path):
             if os.name == "nt":
                 stream.seek(0)
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+@contextmanager
+def wait_lock(path, timeout=30):
+    """Like lock(), but waits for a short-lived holder such as an in-progress sync."""
+    deadline = time.monotonic() + timeout
+    while True:
+        held = lock(path)
+        try:
+            held.__enter__()
+            break
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        held.__exit__(None, None, None)
+
+
+def state_path(config):
+    return Path(config).parent / "state.json"
+
+
+def read_state(config):
+    try:
+        return json.loads(state_path(config).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def record_state(config, count=0, error=None):
+    """Remember the latest sync outcome for status and the dashboard."""
+    now = time.time()
+    state = read_state(config)
+    state.update({"checked_at": now, "error": error})
+    if error is None:
+        state["synced_at"] = now
+    if count:
+        state["changed_at"], state["changed"] = now, count
+    try:
+        atomic_json(state_path(config), state)
+    except OSError:
+        pass
 
 
 def unpack(data):

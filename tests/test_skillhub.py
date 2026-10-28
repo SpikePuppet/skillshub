@@ -276,6 +276,87 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
 
 
+class DashboardTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.skills = self.root / "skills"
+        (self.skills / "review").mkdir(parents=True)
+        (self.skills / "review/SKILL.md").write_text("---\nname: review\ndescription: Review code.\n---\nBody\n")
+        self.config = self.root / "client/client.json"
+        self.config.parent.mkdir()
+        self.server = Server(("127.0.0.1", 0), self.skills, None, self.config)
+        thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (self.server.shutdown(), self.server.server_close(), thread.join()))
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+        self.config.write_text(json.dumps({"url": self.url, "interval": 5, "targets": [str(self.root / "global")]}))
+
+    def call(self, route, method="GET", body=None, **headers):
+        headers = {"X-SkillHub": "1", **headers}
+        data = None
+        if body is not None:
+            data, headers["Content-Type"] = json.dumps(body).encode(), "application/json"
+        request = urllib.request.Request(self.url + route, data, headers, method=method)
+        try:
+            with urllib.request.urlopen(request) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            with exc:
+                return exc.code, exc.read()
+
+    def test_dashboard_lists_skills_and_settings(self):
+        status, page = self.call("/")
+        self.assertEqual(status, 200)
+        self.assertIn(b"SkillHub", page)
+        status, body = self.call("/api/overview")
+        overview = json.loads(body)
+        self.assertEqual([s["name"] for s in overview["skills"]], ["review"])
+        self.assertEqual(overview["client"]["interval"], 5)
+        status, text = self.call("/api/skills/review")
+        self.assertIn(b"Body", text)
+        self.assertEqual(self.call("/api/skills/..%2Fsecret")[0], 404)
+
+    def test_settings_update_interval_projects_and_sync(self):
+        status, body = self.call("/api/settings", "PUT", {"interval": 60})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(self.config.read_text())["interval"], 60)
+        self.assertEqual(self.call("/api/settings", "PUT", {"interval": 0})[0], 400)
+        self.assertEqual(self.call("/api/settings", "PUT", {"interval": "5"})[0], 400)
+        project = self.root / "project"
+        project.mkdir()
+        status, body = self.call("/api/projects", "POST", {"path": str(project), "harnesses": ["codex"]})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["projects"][0]["harnesses"], ["codex"])
+        self.assertEqual(self.call("/api/projects", "POST", {"path": str(self.root / "missing")})[0], 400)
+        status, body = self.call("/api/sync", "POST", {})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["changed"], 2)
+        self.assertTrue((project / ".agents/skills/review/SKILL.md").exists())
+        self.assertIsNone(json.loads(body)["client"]["state"]["error"])
+        status, body = self.call("/api/projects", "DELETE", {"path": str(project)})
+        self.assertEqual(json.loads(body)["projects"], [])
+
+    def test_settings_require_local_origin_and_header(self):
+        status, _ = self.call("/api/settings", "PUT", {"interval": 60}, **{"X-SkillHub": ""})
+        self.assertEqual(status, 403)
+        status, _ = self.call("/api/settings", "PUT", {"interval": 60}, Host="attacker.example")
+        self.assertEqual(status, 403)
+        status, body = self.call("/api/overview", Host="attacker.example")
+        self.assertIsNone(json.loads(body)["client"])
+        self.assertEqual(json.loads(self.config.read_text())["interval"], 5)
+
+    def test_shared_server_has_no_settings(self):
+        server = Server(("127.0.0.1", 0), self.skills)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (server.shutdown(), server.server_close(), thread.join()))
+        self.url = f"http://127.0.0.1:{server.server_port}"
+        self.assertIsNone(json.loads(self.call("/api/overview")[1])["client"])
+        self.assertEqual(self.call("/api/settings", "PUT", {"interval": 60})[0], 404)
+
+
 class HarnessSetupTests(unittest.TestCase):
     def test_selection_and_existing_both_semantics(self):
         with tempfile.TemporaryDirectory() as directory:

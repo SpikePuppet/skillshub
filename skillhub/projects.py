@@ -68,13 +68,24 @@ def read_config(config):
     return with_projects(json.loads(config.read_text()), config)
 
 
+def settings_signature(config):
+    """Changes whenever client.json or projects.json is rewritten."""
+    stamps = []
+    for path in (config, projects_path(config)):
+        try:
+            stamps.append(path.stat().st_mtime_ns)
+        except OSError:
+            stamps.append(None)
+    return tuple(stamps)
+
+
 def update_project(config, project, choices=None):
     # Share the sync lock so a completed removal cannot race a stale sync.
-    from .client import atomic_json, lock
+    from .client import atomic_json, wait_lock
     root = project.expanduser().resolve()
     if choices is not None and not root.is_dir():
         raise ValueError(f"Project directory does not exist: {root}")
-    with lock(config.parent / "sync.lock"):
+    with wait_lock(config.parent / "sync.lock"):
         entries = [entry for entry in read_projects(config)
                    if Path(entry["path"]).resolve() != root]
         if choices is not None:

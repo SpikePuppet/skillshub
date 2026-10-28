@@ -1,4 +1,5 @@
 """Per-user setup and login startup files; no administrator privileges needed."""
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -6,7 +7,8 @@ import subprocess
 import sys
 import time
 
-from .client import SKILLS_UPDATED_NOTICE, atomic_json, lock, sync
+from . import console
+from .client import SKILLS_UPDATED_NOTICE, atomic_json, lock, record_state, sync, wait_lock
 from .projects import HARNESS_CHOICES, harnesses, with_projects
 
 
@@ -87,10 +89,37 @@ def stop_background(config):
     raise RuntimeError("Sync is still stopping; try again after the current download finishes")
 
 
+MIN_INTERVAL = 1
+MENU = (("1", "Cursor"), ("2", "OpenCode"), ("3", "Cursor + OpenCode"),
+        ("4", "Codex"), ("5", "Claude Code"), ("6", "All four"), ("0", "Server only"))
+
+
+def watcher_running(config):
+    try:
+        with lock(config.parent / "watch.lock"):
+            return False
+    except RuntimeError:
+        return True
+
+
+def update_interval(config, interval):
+    """Change the polling interval; a running watcher applies it immediately."""
+    interval = float(interval)
+    if not interval >= MIN_INTERVAL:
+        raise ValueError("Interval must be at least one second")
+    with wait_lock(config.parent / "sync.lock"):
+        value = json.loads(config.read_text())
+        value["interval"] = interval
+        atomic_json(config, value)
+
+
 def configure(config, url, choice, interval, autostart=True, start=True):
     if not choice:
-        answer = input("Set up [1] Cursor, [2] OpenCode, [3] Cursor + OpenCode, "
-                       "[4] Codex, [5] Claude Code, [6] all, [0] server only: ").strip()
+        console.heading("SkillHub setup", "Which tools should receive shared skills?")
+        for key, label in MENU:
+            print(f"    {console.out(key, 'accent', 'bold')}  {label}")
+        console.blank()
+        answer = input("  Select › ").strip()
         if answer == "0":
             return
         choice = {"1": "cursor", "2": "opencode", "3": "both",
@@ -101,7 +130,7 @@ def configure(config, url, choice, interval, autostart=True, start=True):
     parsed = urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.query or parsed.fragment or parsed.username:
         raise ValueError("Use an HTTP(S) service URL without credentials, query, or fragment")
-    if interval < 1:
+    if interval < MIN_INTERVAL:
         raise ValueError("Interval must be at least one second")
     config = config.expanduser().absolute()
     value = {"url": url.rstrip("/"), "targets": targets(choice), "interval": interval,
@@ -109,11 +138,16 @@ def configure(config, url, choice, interval, autostart=True, start=True):
     with lock(config.parent / "sync.lock"):
         _, count = sync(with_projects(value, config))
         atomic_json(config, value)
-    print(f"Synchronized {count} skill folders. Configuration: {config}", flush=True)
+        record_state(config, count)
+    console.blank()
+    console.success(f"Synchronized {count} skill folder{'s' if count != 1 else ''}")
     if count:
-        print(SKILLS_UPDATED_NOTICE, flush=True)
+        console.warn(SKILLS_UPDATED_NOTICE)
+    rows = [("Config", console.muted(str(config)))]
     if autostart:
-        print(f"Login startup installed: {enable_startup(config)}", flush=True)
+        rows.append(("Login start", console.muted(str(enable_startup(config)))))
     if start:
         start_background(config)
-        print(f"Background sync started; log: {config.parent / 'client.log'}", flush=True)
+        rows.append(("Background", f"syncing every {interval:g}s {console.muted('· log ' + str(config.parent / 'client.log'))}"))
+    console.fields(rows)
+    console.blank()

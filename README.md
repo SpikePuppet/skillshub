@@ -18,6 +18,8 @@ On Windows, from PowerShell:
 
 The script creates `.venv`, installs the project, starts the service at `http://127.0.0.1:8765`, and, when no client config exists, asks whether to set up **Cursor, OpenCode, Codex, Claude Code, all four, or server only** (the existing Cursor + OpenCode option is also available). Selecting a harness downloads skills immediately and starts a background sync process. Open the harness and use the installed `example-review` skill. Keep this terminal open: after the initial sync finishes, the server continues running in the foreground. Press **Ctrl+C** to stop the server; the background sync client is a separate process. Choosing **server only** does not save a client config, so the setup menu appears again on the next `start`.
 
+Open **http://127.0.0.1:8765** for the dashboard: browse every skill in the library (search, read each `SKILL.md`, see its files), and use **Settings** to add or remove project directories, change how often this computer syncs, or sync immediately. Changes apply to the running background sync straight away.
+
 Setup writes skills to the selected harness's global directory:
 
 - Cursor: `~/.cursor/skills/<name>/`
@@ -36,7 +38,7 @@ With the server still running, open a second terminal in the repository root to 
 
 The same flags work with `scripts/setup.ps1` and `skillhub setup`. `--harness both` continues to mean Cursor + OpenCode. Rerunning setup replaces the selected targets in the client configuration; copies in deselected harnesses remain installed but stop receiving updates. Codex uses its current documented user skill directory, `~/.agents/skills`. Claude Code setup uses the default `~/.claude` directory; for a custom Claude configuration directory, adjust `targets` in the client config before syncing.
 
-The client polls every five seconds. It runs independently of the harness, so files are ready when the harness opens. Harness discovery and conversational context are controlled by the harness itself: **start a new session or reload the harness if a running session does not pick up a new skill**. This project does not promise hot injection into an existing conversation. Skills provide instructions; they do not install tools or runtime dependencies referenced by those instructions.
+The client polls every five seconds by default (adjustable in the dashboard). It runs independently of the harness, so files are ready when the harness opens. Harness discovery and conversational context are controlled by the harness itself: **start a new session or reload the harness if a running session does not pick up a new skill**. This project does not promise hot injection into an existing conversation. Skills provide instructions; they do not install tools or runtime dependencies referenced by those instructions.
 
 ## Restart later, after the first sync
 
@@ -162,12 +164,24 @@ The service rescans on requests, so there is no restart or publish step. Stage u
 
 The client refuses to overwrite existing unmanaged skills or locally edited managed skills, including extra files. Resolve a collision by moving the local folder out of the harness's skills directory or renaming the server skill (including its frontmatter). Edit shared skills on the server, not in downloaded copies. Only folders owned by the configured service are updated or removed.
 
+## Dashboard
+
+Every server shows a read-only skill library at `/`. On a shared server started with `skillhub serve`, the page lists skills only; if `SKILLHUB_TOKEN` is set, the page asks for the token and remembers it in that browser.
+
+Settings (project directories, sync interval, sync now) are only available for **this computer's** client configuration:
+
+- `skillhub start` serves the dashboard with settings for the local client config.
+- On a client connected to a remote service, run `skillhub ui` to open a loopback-only dashboard (default port 8766; `--port`, `--no-open`). It lists the remote catalog using the saved URL and token.
+
+Settings changes are accepted only from loopback addresses that use a `localhost`/`127.0.0.1`/`[::1]` host name and send the dashboard's `X-SkillHub` header. Other machines on the network can view the library but cannot change anyone's settings. The page loads its typefaces from Google Fonts and falls back to local fonts when offline.
+
 ## Client controls
 
 After bootstrap, run `.venv/bin/skillhub` on Unix or `.venv/Scripts/skillhub.exe` on Windows:
 
 ```sh
-skillhub status
+skillhub status                       # Add --json for machine-readable output
+skillhub ui                           # Open the dashboard and settings in a browser
 skillhub sync                         # Fetch immediately
 skillhub watch                        # Foreground client (also suitable for a service manager)
 skillhub stop                         # Stop the current background client
@@ -177,7 +191,7 @@ skillhub setup --harness both         # Select Cursor + OpenCode and start synci
 
 Use the full virtual-environment path unless it is activated. Configuration defaults to `~/.config/skillhub/client.json`; logs are alongside it in `client.log`. `--config PATH` is available on client commands. One configured service per client config is supported. Use a stable service URL: ownership is tied to that URL.
 
-Login startup uses a LaunchAgent on macOS, XDG desktop autostart on Linux, and the Startup folder on Windows. Linux desktop startup requires a graphical login; for a headless Linux client, supervise `skillhub watch` with your service manager instead. By default, setup starts the client immediately on all three platforms. `--no-autostart` skips login startup; `--no-start` skips the background process. Both flags still perform the initial sync, so setup requires a running server; combine them to perform setup without login startup or a background watcher. `--interval SECONDS` controls polling. Startup registration is per user, with one standard startup entry; custom configs do not create multiple login jobs.
+Login startup uses a LaunchAgent on macOS, XDG desktop autostart on Linux, and the Startup folder on Windows. Linux desktop startup requires a graphical login; for a headless Linux client, supervise `skillhub watch` with your service manager instead. By default, setup starts the client immediately on all three platforms. `--no-autostart` skips login startup; `--no-start` skips the background process. Both flags still perform the initial sync, so setup requires a running server; combine them to perform setup without login startup or a background watcher. `--interval SECONDS` sets the initial polling interval; change it later from the dashboard's Settings tab. Startup registration is per user, with one standard startup entry; custom configs do not create multiple login jobs.
 
 Stopping the server or losing connectivity leaves the last downloaded skills usable. The client retries and logs failures. Sync validates the complete archive before installation, preflights conflicts across all selected targets, stages each skill on its destination filesystem, and recovers interrupted folder replacements. Replacement is per skill; it is not a transaction spanning all skills/harnesses. There can be a brief directory-swap gap. Local concurrent edits during a sync are not supported.
 
@@ -187,7 +201,7 @@ Keep a separate, per-user list of projects that should receive the shared librar
 
 ```sh
 .venv/bin/skillhub projects add ~/Code/my-project --harness codex --harness claude-code
-.venv/bin/skillhub projects list
+.venv/bin/skillhub projects list                    # --json for scripts
 .venv/bin/skillhub sync
 .venv/bin/skillhub projects remove ~/Code/my-project
 ```
@@ -207,7 +221,7 @@ The list lives in `~/.config/skillhub/projects.json`, separately from `client.js
 
 Each opted-in project receives skills under `.cursor/skills`, `.opencode/skills`, `.agents/skills` (Codex), or `.claude/skills`, according to its selection. These are additional destinations; global sync continues. All shared skills are included. Rerunning setup preserves the separate project list.
 
-The background watcher reloads the list each poll and downloads for new destinations even when the server catalog is unchanged. `skillhub sync` applies it immediately. A watcher started before upgrading to this feature needs a one-time restart. Missing project directories are skipped without recreating them, and sync resumes when they return. Invalid lists pause sync with a logged error.
+Projects can also be added and removed from the dashboard's Settings tab. The background watcher notices list or interval changes immediately, reloads the list each poll, and downloads for new destinations even when the server catalog is unchanged. `skillhub sync` applies it immediately. A watcher started before upgrading to this feature needs a one-time restart. Missing project directories are skipped without recreating them, and sync resumes when they return. Invalid lists pause sync with a logged error.
 
 Removing a project or deselecting a harness stops its updates and leaves existing copies intact. While opted in, server updates/removals and local-edit protection work just like global sync; a conflicting project skill pauses the entire sync. Project files may appear in Git status; SkillHub does not edit your ignore rules. Local delivery does not invalidate a harness's own skill/menu cache, including T3 Code's cached project lists.
 
@@ -215,6 +229,8 @@ When setup or sync adds, updates, or removes skill folders, it prints “Skills 
 
 ## HTTP interfaces
 
+- `GET /`: the dashboard page.
+- `GET /api/overview`, `GET /api/skills/<name>`: data behind the dashboard. `PUT /api/settings`, `POST`/`DELETE /api/projects`, and `POST /api/sync` edit local client settings (see Dashboard for restrictions).
 - `GET /healthz`: process health (does not validate skills).
 - `GET /v1/catalog`: validated manifest with file hashes and content versions.
 - `GET /v1/bundle.zip`: one consistent snapshot, with ETag/conditional request support; used by the sync client.
@@ -233,6 +249,8 @@ For OpenCode versions supporting remote skills, you can configure the native end
 Some older versions use `"skills": {"urls": ["..."]}`. Native refresh timing is controlled by OpenCode; the sync client is the recommended route for predictable polling. Native configuration does not include bearer-header setup, so use the client for token-protected services. Do not enable both delivery routes for the same OpenCode library. The native endpoint consists of separate file requests; concurrent server edits can span versions. The sync client's bundle avoids that issue.
 
 Commands are intentionally separate: this version distributes skills and their supporting files, not OpenCode command definitions. Harness-specific fields, referenced tools, and tool permissions remain the author's responsibility. Setup targets local desktop/CLI harnesses; remote/cloud agents need their own integration or client.
+
+Terminal output uses colour and symbols when attached to an interactive terminal. Redirected output and `client.log` stay plain and timestamped. Set `NO_COLOR=1` to disable colour, or `FORCE_COLOR=1` to force it. When stdout is not a terminal, `status` and `projects list` print JSON as before.
 
 ## Development and verification
 
