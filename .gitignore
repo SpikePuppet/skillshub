@@ -5,3 +5,6 @@ __pycache__/
 build/
 dist/
 .DS_Store
+
+skills/
+!skills/example-review/
