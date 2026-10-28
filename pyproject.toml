@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skillhub-service"
+version = "0.1.0"
+description = "A shared skill directory for Cursor and OpenCode"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0.2,<7"]
+
+[project.scripts]
+skillhub = "skillhub.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["skillhub*"]
