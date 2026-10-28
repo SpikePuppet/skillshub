@@ -8,7 +8,7 @@ import threading
 import time
 
 from .catalog import snapshot
-from .client import lock, sync
+from .client import SKILLS_UPDATED_NOTICE, lock, sync
 from .server import Server
 from .projects import read_config, read_projects, projects_path, update_project
 from .setup import HARNESS_CHOICES, configure, default_config, startup_path, stop_background, start_background
@@ -31,6 +31,7 @@ def watch(config):
                 previous = value
                 if count:
                     logging.info("Updated %s skill folders", count)
+                    logging.info(SKILLS_UPDATED_NOTICE)
             except Exception as exc:
                 logging.error("Sync failed; installed skills retained: %s", exc)
             deadline = time.monotonic() + interval
@@ -108,6 +109,8 @@ def main():
             with lock(args.config.parent / "sync.lock"):
                 _, count = sync(read_config(args.config))
                 print(f"Updated {count} skill folders")
+                if count:
+                    print(SKILLS_UPDATED_NOTICE)
         elif args.command == "projects":
             if args.project_command == "list":
                 print(json.dumps(read_projects(args.config), indent=2))

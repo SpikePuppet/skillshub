@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 
-from .client import atomic_json, lock, sync
+from .client import SKILLS_UPDATED_NOTICE, atomic_json, lock, sync
 from .projects import HARNESS_CHOICES, harnesses, with_projects
 
 
@@ -110,6 +110,8 @@ def configure(config, url, choice, interval, autostart=True, start=True):
         _, count = sync(with_projects(value, config))
         atomic_json(config, value)
     print(f"Synchronized {count} skill folders. Configuration: {config}", flush=True)
+    if count:
+        print(SKILLS_UPDATED_NOTICE, flush=True)
     if autostart:
         print(f"Login startup installed: {enable_startup(config)}", flush=True)
     if start:

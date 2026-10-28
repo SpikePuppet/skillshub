@@ -13,6 +13,7 @@ import zipfile
 from .catalog import MAX_BYTES, MAX_FILES, NAME, digest, metadata, safe_path
 
 MARKER = ".skillhub.json"
+SKILLS_UPDATED_NOTICE = "Skills updated—restart T3 Code if the changes don't appear."
 
 
 def atomic_json(path, value):

@@ -159,6 +159,8 @@ The background watcher reloads the list each poll and downloads for new destinat
 
 Removing a project or deselecting a harness stops its updates and leaves existing copies intact. While opted in, server updates/removals and local-edit protection work just like global sync; a conflicting project skill pauses the entire sync. Project files may appear in Git status; SkillHub does not edit your ignore rules. Local delivery does not invalidate a harness's own skill/menu cache, including T3 Code's cached project lists.
 
+When setup or sync adds, updates, or removes skill folders, it prints “Skills updated—restart T3 Code if the changes don't appear.” The background watcher writes the same notice to `client.log`; unchanged polls stay quiet. If T3 Code still shows stale skills, restart T3 Code (including its backend). SkillHub does not restart it automatically or modify T3 Code.
+
 ## HTTP interfaces
 
 - `GET /healthz`: process health (does not validate skills).
