@@ -5,6 +5,7 @@ edit that user's settings. Settings changes are accepted only from loopback
 clients addressing the server by a loopback host name, and only with a custom
 header that cross-site pages cannot send without a CORS preflight.
 """
+import collections
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
@@ -12,16 +13,72 @@ import json
 import logging
 import mimetypes
 from pathlib import Path
+import re
+import threading
 import urllib.request
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from .catalog import MAX_BYTES, NAME, digest, snapshot
 from .client import read_state, record_state, sync, wait_lock
+from .library import Conflict, add_skills
 from .projects import PROJECT_PATHS, read_config, read_projects, update_project
 
 DASHBOARD = Path(__file__).with_name("web") / "index.html"
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 QUIET_ROUTES = ("/", "/index.html", "/favicon.ico")
+UPLOAD_BODY_LIMIT = 96 * 1024 * 1024  # 64 MiB of files, base64-encoded in JSON
+CLIENT_LOG_TAIL = 256 * 1024
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+CLIENT_LOG_LINE = re.compile(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (DEBUG|INFO|WARNING|ERROR|CRITICAL) (.*)")
+
+
+class LogBuffer(logging.Handler):
+    """Keeps this process's recent log records for the dashboard's Logs panel."""
+
+    def __init__(self, size=500):
+        super().__init__(logging.INFO)
+        self.records, self.seq, self.guard = collections.deque(maxlen=size), 0, threading.Lock()
+
+    def emit(self, record):
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+        level = "SUCCESS" if getattr(record, "success", False) else record.levelname
+        http = getattr(record, "http", None)
+        with self.guard:
+            self.seq += 1
+            self.records.append({"seq": self.seq, "time": record.created, "level": level,
+                                 "message": message, "http": list(http) if http else None})
+
+    def since(self, seq):
+        with self.guard:
+            return [r for r in self.records if r["seq"] > seq], self.seq
+
+
+LOGS = LogBuffer()
+
+
+def tail_client_log(path, limit=300):
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(0, 2)
+            size = stream.tell()
+            stream.seek(max(0, size - CLIENT_LOG_TAIL))
+            text = ANSI.sub("", stream.read().decode("utf-8", "replace"))
+    except OSError:
+        return []
+    lines = text.splitlines()[1 if size > CLIENT_LOG_TAIL else 0:]
+    entries = []
+    for line in lines:
+        match = CLIENT_LOG_LINE.match(line)
+        if match:
+            entries.append({"stamp": match[1], "level": match[2], "message": match[3]})
+        elif line.strip() and entries:
+            entries[-1]["message"] += "\n" + line  # traceback or wrapped output
+        elif line.strip():
+            entries.append({"stamp": None, "level": "INFO", "message": line})
+    return entries[-limit:]
 
 
 class Server(ThreadingHTTPServer):
@@ -29,6 +86,11 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, root, token=None, config=None):
         self.root, self.token, self.config = root, token, config
+        root_logger = logging.getLogger()
+        if LOGS not in root_logger.handlers:
+            root_logger.addHandler(LOGS)
+            if root_logger.level > logging.INFO or root_logger.level == logging.NOTSET:
+                root_logger.setLevel(logging.INFO)
         super().__init__(address, Handler)
 
 
@@ -138,11 +200,11 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.api(method, route)
 
-    def body(self):
+    def body(self, limit=64 * 1024):
         if not (self.headers.get("Content-Type") or "").startswith("application/json"):
             raise ApiError(415, "Expected a JSON request body")
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 64 * 1024:
+        if length > limit:
             raise ApiError(413, "Request body too large")
         try:
             value = json.loads(self.rfile.read(length) or b"{}")
@@ -155,7 +217,22 @@ class Handler(BaseHTTPRequestHandler):
     def api(self, method, route):
         try:
             if method == "GET" and route == "/api/overview":
-                self.json(200, {"source": self.source(), **self.skills(), "client": self.client()})
+                local = self.local()
+                self.json(200, {"source": self.source(), **self.skills(), "client": self.client(),
+                                "can_upload": local and self.server.root is not None, "can_view_logs": local})
+            elif method == "GET" and route == "/api/logs":
+                self.json(200, self.logs())
+            elif method == "POST" and route == "/api/library":
+                root = self.library_root()
+                body = self.body(UPLOAD_BODY_LIMIT)
+                try:
+                    names = add_skills(root, body.get("files"), body.get("replace") is True)
+                except Conflict as exc:
+                    self.json(409, {"error": str(exc), "names": exc.names})
+                    return
+                logging.info("Added %s from the dashboard: %s", "skill" if len(names) == 1 else "skills",
+                             ", ".join(names), extra={"success": True})
+                self.json(200, {"added": names})
             elif method == "GET" and route.startswith("/api/skills/"):
                 self.reply(200, self.skill_file(route[len("/api/skills/"):]), "text/plain; charset=utf-8")
             elif method == "PUT" and route == "/api/settings":
@@ -191,6 +268,28 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             logging.exception("Dashboard request failed")
             self.json(500, {"error": str(exc)})
+
+    def library_root(self):
+        if self.server.root is None:
+            raise ApiError(404, "This dashboard is not serving a skills directory; add skills on the server")
+        if not self.local():
+            raise ApiError(403, "Skills can only be added from the server's own computer")
+        return self.server.root
+
+    def logs(self):
+        if not self.local():
+            raise ApiError(403, "Logs are only available on this computer")
+        try:
+            since = int(parse_qs(urlsplit(self.path).query).get("since", ["0"])[0])
+        except ValueError:
+            since = 0
+        entries, last = LOGS.since(since)
+        config = self.server.config
+        client = None
+        if config and config.exists():
+            path = config.parent / "client.log"
+            client = {"path": str(path), "entries": tail_client_log(path)}
+        return {"server": {"entries": entries, "last": last}, "client": client}
 
     def settings_config(self):
         if not self.server.config:

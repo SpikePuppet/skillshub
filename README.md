@@ -125,7 +125,7 @@ export SKILLHUB_TOKEN='your-shared-token'
 # On each client, set SKILLHUB_TOKEN before running setup.
 ```
 
-Setup saves the token in the user's client config, with owner-only file permissions on Unix. HTTPS is needed to protect the token in transit across untrusted networks. This is a read-only distribution service for trusted skill authors, not a public upload service. Files and scripts in skills are delivered unchanged; SkillHub does not execute them.
+Setup saves the token in the user's client config, with owner-only file permissions on Unix. HTTPS is needed to protect the token in transit across untrusted networks. This is a read-only distribution service for trusted skill authors, not a public upload service (dashboard uploads are accepted only on the server's own machine). Files and scripts in skills are delivered unchanged; SkillHub does not execute them.
 
 ## Add and update skills
 
@@ -168,12 +168,16 @@ The client refuses to overwrite existing unmanaged skills or locally edited mana
 
 Every server shows a read-only skill library at `/`. On a shared server started with `skillhub serve`, the page lists skills only; if `SKILLHUB_TOKEN` is set, the page asks for the token and remembers it in that browser.
 
-Settings (project directories, sync interval, sync now) are only available for **this computer's** client configuration:
+**Adding skills from the browser.** When the dashboard is served from the machine that holds the skills directory (`start`, or `serve` viewed from that machine), the Library tab accepts drag-and-drop anywhere on the page, or the Choose folder / Choose file buttons. Drop a skill folder, a `.zip` (one or more skill folders), or a lone `SKILL.md`. The frontmatter `name` decides the folder name. Hidden files and `__MACOSX` are skipped. Each upload is staged, validated with the same rules as `skillhub validate`, and only then moved into place, so an invalid upload never pauses delivery. Replacing an existing skill asks for confirmation. Browsers do not send file permissions: files from a `.zip` keep their recorded modes, and dropped files that start with `#!` are made executable.
+
+**Logs.** The Logs tab shows live activity. *Background sync* tails this computer's `client.log`. *This server* shows recent records (requests, uploads, warnings) that the dashboard's own process keeps in memory. Routine dashboard polling and unchanged `304` sync checks are not logged.
+
+Settings (project directories, sync interval, sync now), uploads, and logs are only available for **this computer's** client configuration:
 
 - `skillhub start` serves the dashboard with settings for the local client config.
 - On a client connected to a remote service, run `skillhub ui` to open a loopback-only dashboard (default port 8766; `--port`, `--no-open`). It lists the remote catalog using the saved URL and token.
 
-Settings changes are accepted only from loopback addresses that use a `localhost`/`127.0.0.1`/`[::1]` host name and send the dashboard's `X-SkillHub` header. Other machines on the network can view the library but cannot change anyone's settings. The page loads its typefaces from Google Fonts and falls back to local fonts when offline.
+These are accepted only from loopback addresses that use a `localhost`/`127.0.0.1`/`[::1]` host name and send the dashboard's `X-SkillHub` header. Other machines on the network can view the library but cannot change settings, add skills, or read logs. The page loads its typefaces from Google Fonts and falls back to local fonts when offline.
 
 ## Client controls
 
@@ -230,7 +234,7 @@ When setup or sync adds, updates, or removes skill folders, it prints “Skills 
 ## HTTP interfaces
 
 - `GET /`: the dashboard page.
-- `GET /api/overview`, `GET /api/skills/<name>`: data behind the dashboard. `PUT /api/settings`, `POST`/`DELETE /api/projects`, and `POST /api/sync` edit local client settings (see Dashboard for restrictions).
+- `GET /api/overview`, `GET /api/skills/<name>`: data behind the dashboard. `PUT /api/settings`, `POST`/`DELETE /api/projects`, `POST /api/sync`, `POST /api/library` (add skills), and `GET /api/logs` are local-only (see Dashboard).
 - `GET /healthz`: process health (does not validate skills).
 - `GET /v1/catalog`: validated manifest with file hashes and content versions.
 - `GET /v1/bundle.zip`: one consistent snapshot, with ETag/conditional request support; used by the sync client.
@@ -262,5 +266,7 @@ Terminal output uses colour and symbols when attached to an interactive terminal
 Integration tests run a real local HTTP server and use temporary client homes. They cover all four destinations, updates/removals, ETags, authentication, supporting files, conflicts, local edits, invalid catalogs, traversal, integrity, symlinks, offline retention, interrupted replacements, and setup/background sync/stop. Harness applications are not automated by this test suite. macOS is the development platform; Windows and Linux startup scripts still need testing on those operating systems.
 
 The server uses Python's standard-library threaded HTTP server and PyYAML. It rescans/builds a snapshot on each request, including conditional requests: suitable for an initial small shared library, not yet optimized for large fleets. No hosted service, remote repository, or marketplace is created by setup.
+
+See [NOTES.md](NOTES.md) for behaviour that works as designed but can be surprising, such as why successful syncs don't print to the server terminal.
 
 References: [Cursor skills](https://cursor.com/docs/skills), [OpenCode skills](https://opencode.ai/docs/skills/), [OpenCode configuration schema](https://opencode.ai/config.json), [Codex skills](https://developers.openai.com/codex/skills/), [Claude Code skills](https://code.claude.com/docs/en/skills).

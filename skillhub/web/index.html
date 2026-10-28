@@ -626,7 +626,7 @@ $("sync-now").addEventListener("click", async (event) => {
 document.querySelectorAll("[data-tab]").forEach((tab) => tab.addEventListener("click", () => {
   document.querySelectorAll("[data-tab]").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
   for (const name of ["library", "settings", "logs"]) $(name).hidden = tab.dataset.tab !== name;
-  history.replaceState(null, "", "#" + tab.dataset.tab);
+  history.replaceState(null, "", "#/" + tab.dataset.tab);
   if (tab.dataset.tab === "logs") startLogs(); else stopLogs();
 }));
 $("search").addEventListener("input", renderLibrary);
@@ -634,7 +634,7 @@ $("reader-close").addEventListener("click", () => $("reader").close());
 $("reader").addEventListener("click", (event) => { if (event.target === $("reader")) $("reader").close(); });
 
 refresh().then(() => {
-  const tab = document.querySelector(`[data-tab="${location.hash.slice(1)}"]`);
+  const tab = document.querySelector(`[data-tab="${location.hash.replace(/^#\/?/, "")}"]`);
   if (tab && !tab.hidden) tab.click();
 });
 setInterval(() => { if (!document.hidden) refresh(); }, 4000);
@@ -697,7 +697,7 @@ function renderLogs() {
 }
 
 function logRow(entry) {
-  const time = entry.stamp ? entry.stamp.slice(11) : new Date(entry.time * 1000).toLocaleTimeString([], { hour12: false });
+  const time = entry.stamp ? entry.stamp.slice(11) : entry.time ? new Date(entry.time * 1000).toLocaleTimeString([], { hour12: false }) : "";
   const level = /updated \d+ skill folder/i.test(entry.message) ? "SUCCESS" : entry.level;
   let message;
   if (entry.http) {

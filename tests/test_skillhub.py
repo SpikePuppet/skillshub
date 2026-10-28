@@ -347,6 +347,63 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNone(json.loads(body)["client"])
         self.assertEqual(json.loads(self.config.read_text())["interval"], 5)
 
+    def upload(self, files, replace=False, **headers):
+        import base64
+        entries = [{"path": path, "data": base64.b64encode(data).decode()} for path, data in files.items()]
+        return self.call("/api/library", "POST", {"files": entries, "replace": replace}, **headers)
+
+    def test_upload_folder_zip_and_single_file(self):
+        skill = b"---\nname: lint\ndescription: Lint code.\n---\nRun the linter.\n"
+        # A dropped folder may be named differently; the frontmatter decides the skill name.
+        status, body = self.upload({"lint-main/SKILL.md": skill, "lint-main/scripts/run.sh": b"#!/bin/sh\n",
+                                    "lint-main/.DS_Store": b"junk"})
+        self.assertEqual((status, json.loads(body)), (200, {"added": ["lint"]}))
+        self.assertEqual((self.skills / "lint/SKILL.md").read_bytes(), skill)
+        self.assertFalse((self.skills / "lint/.DS_Store").exists())
+        if os.name != "nt":
+            self.assertTrue((self.skills / "lint/scripts/run.sh").stat().st_mode & 0o111)
+        status, body = self.upload({"SKILL.md": skill.replace(b"linter", b"new linter")})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body)["names"], ["lint"])
+        self.assertEqual(self.upload({"SKILL.md": skill.replace(b"linter", b"new linter")}, replace=True)[0], 200)
+        self.assertIn(b"new linter", (self.skills / "lint/SKILL.md").read_bytes())
+        self.assertFalse((self.skills / "lint/scripts").exists())
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("bundle/fmt/SKILL.md", "---\nname: fmt\ndescription: Format.\n---\n")
+            bundle.writestr("bundle/docs/SKILL.md", "---\nname: docs\ndescription: Docs.\n---\n")
+        status, body = self.upload({"skills.zip": archive.getvalue()})
+        self.assertEqual(json.loads(body)["added"], ["docs", "fmt"])
+        names = [s["name"] for s in json.loads(self.call("/api/overview")[1])["skills"]]
+        self.assertEqual(names, ["docs", "fmt", "lint", "review"])
+        self.assertEqual([p.name for p in self.skills.iterdir() if p.name.startswith(".")], [])
+
+    def test_upload_rejects_invalid_skills_and_remote_hosts(self):
+        cases = [{"notes.txt": b"hi"}, {"SKILL.md": b"no frontmatter"},
+                 {"SKILL.md": b"---\nname: Bad Name\ndescription: x\n---\n"},
+                 {"../escape/SKILL.md": b"---\nname: escape\ndescription: x\n---\n"},
+                 {"skills.zip": b"not a zip"}]
+        for files in cases:
+            with self.subTest(files=list(files)):
+                status, _ = self.upload(files)
+                self.assertEqual(status, 400)
+        ok = {"SKILL.md": b"---\nname: ok\ndescription: Fine.\n---\n"}
+        self.assertEqual(self.upload(ok, Host="attacker.example")[0], 403)
+        self.assertEqual(sorted(p.name for p in self.skills.iterdir()), ["review"])
+
+    def test_logs_show_server_activity_and_client_log(self):
+        (self.config.parent / "client.log").write_text(
+            "2026-01-01 10:00:00 INFO Watching x\n2026-01-01 10:00:01 ERROR Sync failed\nTraceback line\n")
+        self.call("/v1/missing")
+        status, body = self.call("/api/logs")
+        logs = json.loads(body)
+        self.assertTrue(any(e["http"] and e["http"][1] == "/v1/missing" for e in logs["server"]["entries"]))
+        self.assertEqual([e["level"] for e in logs["client"]["entries"]], ["INFO", "ERROR"])
+        self.assertIn("Traceback line", logs["client"]["entries"][1]["message"])
+        last = logs["server"]["last"]
+        self.assertEqual(json.loads(self.call(f"/api/logs?since={last}")[1])["server"]["entries"], [])
+        self.assertEqual(self.call("/api/logs", Host="attacker.example")[0], 403)
+
     def test_shared_server_has_no_settings(self):
         server = Server(("127.0.0.1", 0), self.skills)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

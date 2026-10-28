@@ -72,7 +72,9 @@ def start_background(config):
         return
     with (config.parent / "client.log").open("ab") as log:
         kwargs = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
-        subprocess.Popen([sys.executable, "-m", "skillhub", "watch", "--config", str(config)], stdin=subprocess.DEVNULL, stdout=log, stderr=log, **kwargs)
+        # The log is a file; never inherit a terminal's request to force colour into it.
+        env = {k: v for k, v in os.environ.items() if k != "FORCE_COLOR"}
+        subprocess.Popen([sys.executable, "-m", "skillhub", "watch", "--config", str(config)], stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env, **kwargs)
 
 
 def stop_background(config):
