@@ -10,6 +10,7 @@ import time
 from .catalog import snapshot
 from .client import lock, sync
 from .server import Server
+from .projects import read_config, read_projects, projects_path, update_project
 from .setup import HARNESS_CHOICES, configure, default_config, startup_path, stop_background, start_background
 
 
@@ -21,11 +22,11 @@ def watch(config):
         while not stop.exists():
             interval = 5
             try:
-                value = json.loads(config.read_text())
-                interval = max(1, float(value["interval"]))
-                if value != previous:
-                    etag = None
                 with lock(config.parent / "sync.lock"):
+                    value = read_config(config)
+                    interval = max(1, float(value["interval"]))
+                    if value != previous:
+                        etag = None
                     etag, count = sync(value, etag)
                 previous = value
                 if count:
@@ -55,6 +56,16 @@ def main():
     p.add_argument("--no-autostart", action="store_true")
     p.add_argument("--no-start", action="store_true")
     p.add_argument("--config", type=Path, default=default_config())
+    p = sub.add_parser("projects", help="Manage the project sync opt-in list")
+    project_commands = p.add_subparsers(dest="project_command", required=True)
+    for command in ("add", "remove", "list"):
+        p = project_commands.add_parser(command)
+        p.add_argument("--config", type=Path, default=default_config())
+        if command != "list":
+            p.add_argument("path", type=Path)
+        if command == "add":
+            p.add_argument("--harness", choices=HARNESS_CHOICES, action="append",
+                           help="Repeat to select harnesses; defaults to all four")
     for command in ("sync", "watch", "stop", "status"):
         p = sub.add_parser(command)
         p.add_argument("--config", type=Path, default=default_config())
@@ -95,8 +106,17 @@ def main():
             configure(args.config, args.url, args.harness, args.interval, not args.no_autostart, not args.no_start)
         elif args.command == "sync":
             with lock(args.config.parent / "sync.lock"):
-                _, count = sync(json.loads(args.config.read_text()))
+                _, count = sync(read_config(args.config))
                 print(f"Updated {count} skill folders")
+        elif args.command == "projects":
+            if args.project_command == "list":
+                print(json.dumps(read_projects(args.config), indent=2))
+            else:
+                choices = (args.harness or ["all"]) if args.project_command == "add" else None
+                update_project(args.config, args.path, choices)
+                print(f"Project list saved: {projects_path(args.config)}")
+                print("The running watcher picks up changes on its next poll; use 'skillhub sync' to sync now."
+                      if choices is not None else "Project updates stopped. Installed skills remain available.")
         elif args.command == "watch":
             watch(args.config)
         elif args.command == "stop":
@@ -105,13 +125,15 @@ def main():
             stop_background(args.config)
             print("Background sync stopped. Installed skills remain available.")
         elif args.command == "status":
-            value = json.loads(args.config.read_text())
+            value = read_config(args.config)
             try:
                 with lock(args.config.parent / "watch.lock"):
                     running = False
             except RuntimeError:
                 running = True
             print(json.dumps({"url": value["url"], "targets": value["targets"], "running": running,
+                              "projects": read_projects(args.config),
+                              "projects_file": str(projects_path(args.config)),
                               "log": str(args.config.parent / "client.log")}, indent=2))
         elif args.command == "validate":
             manifest, _, _ = snapshot(args.skills)

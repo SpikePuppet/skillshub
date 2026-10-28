@@ -129,6 +129,36 @@ Login startup uses a LaunchAgent on macOS, XDG desktop autostart on Linux, and t
 
 Stopping the server or losing connectivity leaves the last downloaded skills usable. The client retries and logs failures. Sync validates the complete archive before installation, preflights conflicts across all selected targets, stages each skill on its destination filesystem, and recovers interrupted folder replacements. Replacement is per skill; it is not a transaction spanning all skills/harnesses. There can be a brief directory-swap gap. Local concurrent edits during a sync are not supported.
 
+## Opt in individual projects
+
+Keep a separate, per-user list of projects that should receive the shared library:
+
+```sh
+.venv/bin/skillhub projects add ~/Code/my-project --harness codex --harness claude-code
+.venv/bin/skillhub projects list
+.venv/bin/skillhub sync
+.venv/bin/skillhub projects remove ~/Code/my-project
+```
+
+On Windows, use `.venv/Scripts/skillhub.exe`. Omit `--harness` to select all four tools. Adding an existing project replaces its harness selection. Paths supplied to the command can be relative; the list stores absolute paths. Project directories must already exist. No projects are opted in automatically.
+
+The list lives in `~/.config/skillhub/projects.json`, separately from `client.json`. With `--config PATH` (placed after `projects add`, `list`, or `remove`), it lives beside that client config. Configs in the same directory share the list and sync lock. You can also edit the list directly:
+
+```json
+[
+  {
+    "path": "/absolute/path/to/my-project",
+    "harnesses": ["codex", "claude-code"]
+  }
+]
+```
+
+Each opted-in project receives skills under `.cursor/skills`, `.opencode/skills`, `.agents/skills` (Codex), or `.claude/skills`, according to its selection. These are additional destinations; global sync continues. All shared skills are included. Rerunning setup preserves the separate project list.
+
+The background watcher reloads the list each poll and downloads for new destinations even when the server catalog is unchanged. `skillhub sync` applies it immediately. A watcher started before upgrading to this feature needs a one-time restart. Missing project directories are skipped without recreating them, and sync resumes when they return. Invalid lists pause sync with a logged error.
+
+Removing a project or deselecting a harness stops its updates and leaves existing copies intact. While opted in, server updates/removals and local-edit protection work just like global sync; a conflicting project skill pauses the entire sync. Project files may appear in Git status; SkillHub does not edit your ignore rules. Local delivery does not invalidate a harness's own skill/menu cache, including T3 Code's cached project lists.
+
 ## HTTP interfaces
 
 - `GET /healthz`: process health (does not validate skills).

@@ -7,8 +7,7 @@ import sys
 import time
 
 from .client import atomic_json, lock, sync
-
-HARNESS_CHOICES = ("cursor", "opencode", "codex", "claude-code", "both", "all")
+from .projects import HARNESS_CHOICES, harnesses, with_projects
 
 
 def default_config():
@@ -17,14 +16,7 @@ def default_config():
 
 def targets(choice, home=None):
     home = Path(home) if home else Path.home()
-    choices = [choice] if isinstance(choice, str) else list(choice)
-    if not choices or any(item not in HARNESS_CHOICES for item in choices):
-        raise ValueError("Choose a supported harness: " + ", ".join(HARNESS_CHOICES))
-    selected = set(choices)
-    if "both" in selected:
-        selected.update(("cursor", "opencode"))
-    if "all" in selected:
-        selected.update(("cursor", "opencode", "codex", "claude-code"))
+    selected = harnesses(choice)
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config")))
     paths = {
         "cursor": home / ".cursor" / "skills",
@@ -115,7 +107,7 @@ def configure(config, url, choice, interval, autostart=True, start=True):
     value = {"url": url.rstrip("/"), "targets": targets(choice), "interval": interval,
              "token": os.environ.get("SKILLHUB_TOKEN")}
     with lock(config.parent / "sync.lock"):
-        _, count = sync(value)
+        _, count = sync(with_projects(value, config))
         atomic_json(config, value)
     print(f"Synchronized {count} skill folders. Configuration: {config}", flush=True)
     if autostart:

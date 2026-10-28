@@ -14,6 +14,7 @@ from skillhub.catalog import snapshot
 from skillhub.client import install, lock, sync, unpack
 from skillhub.server import Server
 from skillhub.setup import configure, targets
+from skillhub.projects import read_config, read_projects, projects_path, update_project
 
 
 class IntegrationTests(unittest.TestCase):
@@ -179,8 +180,28 @@ class IntegrationTests(unittest.TestCase):
                 time.sleep(0.1)
             else:
                 self.fail("Background update did not arrive")
+            # Add a destination after the watcher has cached this unchanged catalog.
+            project = self.root / "watched project"
+            project.mkdir()
+            cli("projects", "add", str(project), "--harness", "codex",
+                "--harness", "claude-code", "--config", str(config))
+            project_skill = project / ".agents/skills/review/SKILL.md"
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                if project_skill.exists():
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail("Project added during watch did not receive the unchanged catalog")
+            self.assertIn("Background update", project_skill.read_text())
+            entries = json.loads(cli("projects", "list", "--config", str(config)).stdout)
+            self.assertEqual(len(entries), 1)
             status = json.loads(cli("status", "--config", str(config)).stdout)
             self.assertTrue(status["running"])
+            self.assertEqual(status["projects"], entries)
+            cli("projects", "remove", str(project), "--config", str(config))
+            self.assertEqual(json.loads(cli("projects", "list", "--config", str(config)).stdout), [])
+            self.assertTrue(project_skill.exists())
         finally:
             cli("stop", "--config", str(config))
         self.assertFalse(json.loads(cli("status", "--config", str(config)).stdout)["running"])
@@ -191,6 +212,68 @@ class IntegrationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 with lock(self.root / "test.lock"):
                     pass
+
+    def test_project_opt_in_lifecycle_and_conflicts(self):
+        config = self.root / "client.json"
+        config.write_text(json.dumps(self.config))
+        project = self.root / "my project"
+        project.mkdir()
+        untouched = self.root / "not opted in"
+        untouched.mkdir()
+        update_project(config, project, ["codex", "claude-code"])
+        update_project(config, project, ["codex", "claude-code"])
+        self.assertEqual(len(read_projects(config)), 1)
+        conflict = project / ".claude/skills/review"
+        conflict.mkdir(parents=True)
+        local = conflict / "SKILL.md"
+        local.write_text("Personal skill")
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            sync(read_config(config))
+        self.assertFalse((self.targets[0] / "review").exists())
+        local.unlink()
+        conflict.rmdir()
+        self.assertEqual(sync(read_config(config))[1], 6)
+        self.assertEqual(list(untouched.iterdir()), [])
+        installed = project / ".agents/skills/review/SKILL.md"
+        self.write_skill("review", "Project update")
+        sync(read_config(config))
+        self.assertIn("Project update", installed.read_text())
+        update_project(config, project)
+        self.write_skill("review", "After opt out")
+        sync(read_config(config))
+        self.assertNotIn("After opt out", installed.read_text())
+        self.assertEqual(read_projects(config), [])
+
+    def test_project_validation_and_missing_directory(self):
+        config = self.root / "client.json"
+        config.write_text(json.dumps(self.config))
+        project = self.root / "missing"
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            update_project(config, project, ["codex"])
+        project.mkdir()
+        update_project(config, project, ["all"])
+        project.rmdir()
+        self.assertEqual(read_config(config)["targets"], self.config["targets"])
+        self.assertFalse(project.exists())
+        project.mkdir()
+        self.assertEqual(len(read_config(config)["targets"]), 8)
+        projects_path(config).write_text('[{"path": "relative", "harnesses": ["codex"]}]')
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            read_config(config)
+
+    @unittest.skipIf(os.name == "nt", "Symlink permissions vary on Windows")
+    def test_project_rejects_redirected_harness_directory(self):
+        config = self.root / "client.json"
+        config.write_text(json.dumps(self.config))
+        project = self.root / "project"
+        project.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (project / ".agents").symlink_to(outside, target_is_directory=True)
+        update_project(config, project, ["codex"])
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            read_config(config)
+        self.assertEqual(list(outside.iterdir()), [])
 
 
 class HarnessSetupTests(unittest.TestCase):
