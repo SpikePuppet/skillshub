@@ -1,6 +1,6 @@
 # SkillHub
 
-A Python service that turns a directory of skills into a shared library for **Cursor and OpenCode**. Drop a skill folder into the service directory; connected users receive it automatically. The repository contains the service, client, and setup scripts. No marketplace or package publishing is required.
+A Python service that turns a directory of skills into a shared library for **Cursor, OpenCode, Codex, and Claude Code**. Drop a skill folder into the service directory; connected users receive it automatically. The repository contains the service, client, and setup scripts. No marketplace or package publishing is required.
 
 ## Start locally
 
@@ -16,12 +16,25 @@ On Windows, from PowerShell:
 ./scripts/start.ps1
 ```
 
-The script creates `.venv`, installs the project, starts the service at `http://127.0.0.1:8765`, and on first launch asks whether to set up **Cursor, OpenCode, both, or server only**. Selecting a harness downloads skills immediately and starts a background sync process. Open the harness and use the installed `example-review` skill.
+The script creates `.venv`, installs the project, starts the service at `http://127.0.0.1:8765`, and on first launch asks whether to set up **Cursor, OpenCode, Codex, Claude Code, all four, or server only** (the existing Cursor + OpenCode option is also available). Selecting a harness downloads skills immediately and starts a background sync process. Open the harness and use the installed `example-review` skill.
 
 Setup writes skills to the selected harness's global directory:
 
 - Cursor: `~/.cursor/skills/<name>/`
 - OpenCode: `$XDG_CONFIG_HOME/opencode/skills/<name>/`, defaulting to `~/.config/opencode/skills/<name>/`
+- Codex: `~/.agents/skills/<name>/`
+- Claude Code: `~/.claude/skills/<name>/`
+
+Choose adapters individually, combine them by repeating `--harness`, or select all four:
+
+```sh
+./scripts/setup.sh --harness codex
+./scripts/setup.sh --harness claude-code
+./scripts/setup.sh --harness codex --harness claude-code
+./scripts/setup.sh --harness all
+```
+
+The same flags work with `scripts/setup.ps1` and `skillhub setup`. `--harness both` continues to mean Cursor + OpenCode. Rerunning setup replaces the selected targets in the client configuration; copies in deselected harnesses remain installed but stop receiving updates. Codex uses its current documented user skill directory, `~/.agents/skills`. Claude Code setup uses the default `~/.claude` directory; for a custom Claude configuration directory, adjust `targets` in the client config before syncing.
 
 The client polls every five seconds. It runs independently of the harness, so files are ready when the harness opens. Harness discovery and conversational context are controlled by the harness itself: **start a new session or reload the harness if a running session does not pick up a new skill**. This project does not promise hot injection into an existing conversation. Skills provide instructions; they do not install tools or runtime dependencies referenced by those instructions.
 
@@ -114,7 +127,7 @@ Use the full virtual-environment path unless it is activated. Configuration defa
 
 Login startup uses a LaunchAgent on macOS, XDG desktop autostart on Linux, and the Startup folder on Windows. Linux desktop startup requires a graphical login; for a headless Linux client, supervise `skillhub watch` with your service manager instead. Setup starts the client immediately in all cases. `--no-autostart` skips login startup; `--no-start` skips the background process. `--interval SECONDS` controls polling. Startup registration is per user, with one standard startup entry; custom configs do not create multiple login jobs.
 
-Stopping the server or losing connectivity leaves the last downloaded skills usable. The client retries and logs failures. Sync validates the complete archive before installation, preflights conflicts across both targets, stages each skill on its destination filesystem, and recovers interrupted folder replacements. Replacement is per skill; it is not a transaction spanning all skills/harnesses. There can be a brief directory-swap gap. Local concurrent edits during a sync are not supported.
+Stopping the server or losing connectivity leaves the last downloaded skills usable. The client retries and logs failures. Sync validates the complete archive before installation, preflights conflicts across all selected targets, stages each skill on its destination filesystem, and recovers interrupted folder replacements. Replacement is per skill; it is not a transaction spanning all skills/harnesses. There can be a brief directory-swap gap. Local concurrent edits during a sync are not supported.
 
 ## HTTP interfaces
 
@@ -144,8 +157,8 @@ Commands are intentionally separate: this version distributes skills and their s
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Integration tests run a real local HTTP server and use temporary client homes. They cover both destinations, updates/removals, ETags, authentication, supporting files, conflicts, local edits, invalid catalogs, traversal, integrity, symlinks, offline retention, interrupted replacements, and setup/background sync/stop. Harness applications are not automated by this test suite. macOS is the development platform; Windows and Linux startup scripts still need testing on those operating systems.
+Integration tests run a real local HTTP server and use temporary client homes. They cover all four destinations, updates/removals, ETags, authentication, supporting files, conflicts, local edits, invalid catalogs, traversal, integrity, symlinks, offline retention, interrupted replacements, and setup/background sync/stop. Harness applications are not automated by this test suite. macOS is the development platform; Windows and Linux startup scripts still need testing on those operating systems.
 
 The server uses Python's standard-library threaded HTTP server and PyYAML. It rescans/builds a snapshot on each request, including conditional requests: suitable for an initial small shared library, not yet optimized for large fleets. No hosted service, remote repository, or marketplace is created by setup.
 
-References: [Cursor skills](https://cursor.com/docs/skills), [OpenCode skills](https://opencode.ai/docs/skills/), [OpenCode configuration schema](https://opencode.ai/config.json).
+References: [Cursor skills](https://cursor.com/docs/skills), [OpenCode skills](https://opencode.ai/docs/skills/), [OpenCode configuration schema](https://opencode.ai/config.json), [Codex skills](https://developers.openai.com/codex/skills/), [Claude Code skills](https://code.claude.com/docs/en/skills).

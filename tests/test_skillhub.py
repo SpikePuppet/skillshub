@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 import zipfile
@@ -12,6 +13,7 @@ import zipfile
 from skillhub.catalog import snapshot
 from skillhub.client import install, lock, sync, unpack
 from skillhub.server import Server
+from skillhub.setup import configure, targets
 
 
 class IntegrationTests(unittest.TestCase):
@@ -27,7 +29,8 @@ class IntegrationTests(unittest.TestCase):
         self.thread.start()
         self.addCleanup(self.close)
         self.url = f"http://127.0.0.1:{self.server.server_port}"
-        self.targets = [self.root / "cursor", self.root / "opencode"]
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.root / "home/.config")}):
+            self.targets = list(map(Path, targets("all", self.root / "home")))
         self.config = {"url": self.url, "token": "test-secret", "targets": list(map(str, self.targets))}
 
     def close(self):
@@ -50,7 +53,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_delivery_updates_removal_and_cache(self):
         etag, count = sync(self.config)
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 4)
         for target in self.targets:
             self.assertEqual((target / "review/references/check.md").read_text(), "A supporting file")
             if os.name != "nt":
@@ -60,16 +63,16 @@ class IntegrationTests(unittest.TestCase):
         self.write_skill("new-skill", "Another skill")
         etag2, count = sync(self.config, etag)
         self.assertNotEqual(etag, etag2)
-        self.assertEqual(count, 4)
+        self.assertEqual(count, 8)
         import shutil
         shutil.rmtree(self.skills / "review")
-        self.assertEqual(sync(self.config)[1], 2)
+        self.assertEqual(sync(self.config)[1], 4)
         for target in self.targets:
             self.assertFalse((target / "review").exists())
             self.assertTrue((target / "new-skill/SKILL.md").exists())
 
     def test_local_conflict_preflights_all_targets(self):
-        conflict = self.targets[1] / "review"
+        conflict = self.targets[-1] / "review"
         conflict.mkdir(parents=True)
         (conflict / "SKILL.md").write_text("Personal skill")
         with self.assertRaisesRegex(ValueError, "already exists"):
@@ -161,16 +164,17 @@ class IntegrationTests(unittest.TestCase):
             return subprocess.run([sys.executable, "-m", "skillhub", *args], env=env,
                                   capture_output=True, text=True, timeout=30, check=True)
         try:
-            cli("setup", "--url", self.url, "--harness", "both", "--interval", "1",
+            cli("setup", "--url", self.url, "--harness", "all", "--interval", "1",
                 "--no-autostart", "--config", str(config))
             cursor = home / ".cursor/skills/review/SKILL.md"
             opencode = home / ".config/opencode/skills/review/SKILL.md"
-            self.assertTrue(cursor.exists())
-            self.assertTrue(opencode.exists())
+            installed = [cursor, opencode, home / ".agents/skills/review/SKILL.md",
+                         home / ".claude/skills/review/SKILL.md"]
+            self.assertTrue(all(path.exists() for path in installed))
             self.write_skill("review", "Background update")
             deadline = time.monotonic() + 8
             while time.monotonic() < deadline:
-                if cursor.exists() and "Background update" in cursor.read_text() and "Background update" in opencode.read_text():
+                if all(path.exists() and "Background update" in path.read_text() for path in installed):
                     break
                 time.sleep(0.1)
             else:
@@ -187,6 +191,37 @@ class IntegrationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 with lock(self.root / "test.lock"):
                     pass
+
+
+class HarnessSetupTests(unittest.TestCase):
+    def test_selection_and_existing_both_semantics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / "xdg")}):
+                expected = [str(home / relative) for relative in
+                            (".cursor/skills", "xdg/opencode/skills", ".agents/skills", ".claude/skills")]
+                self.assertEqual(targets("both", home), expected[:2])
+                self.assertEqual(targets("all", home), expected)
+                self.assertEqual(targets("codex", home), expected[2:3])
+                self.assertEqual(targets("claude-code", home), expected[3:])
+                self.assertEqual(targets(["codex", "claude-code", "codex"], home), expected[2:])
+                self.assertEqual(targets(["all", "both", "codex"], home), expected)
+                with self.assertRaises(ValueError):
+                    targets("unknown", home)
+
+    def test_interactive_new_harnesses(self):
+        for answer, choice in (("4", "codex"), ("5", "claude-code"), ("6", "all")):
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as directory:
+                config = Path(directory) / "client.json"
+                with patch("builtins.input", return_value=answer), patch("skillhub.setup.sync", return_value=(None, 0)):
+                    configure(config, "http://localhost:8765", None, 5, autostart=False, start=False)
+                self.assertEqual(json.loads(config.read_text())["targets"], targets(choice))
+
+    def test_cli_repeated_harnesses(self):
+        from skillhub.cli import main
+        with patch("sys.argv", ["skillhub", "setup", "--harness", "codex", "--harness", "claude-code"]), patch("skillhub.cli.configure") as setup:
+            main()
+        self.assertEqual(setup.call_args.args[2], ["codex", "claude-code"])
 
 
 if __name__ == "__main__":

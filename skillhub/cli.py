@@ -10,7 +10,7 @@ import time
 from .catalog import snapshot
 from .client import lock, sync
 from .server import Server
-from .setup import configure, default_config, startup_path, stop_background, start_background
+from .setup import HARNESS_CHOICES, configure, default_config, startup_path, stop_background, start_background
 
 
 def watch(config):
@@ -38,7 +38,7 @@ def watch(config):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Serve a shared skill library to Cursor and OpenCode")
+    parser = argparse.ArgumentParser(description="Serve a shared skill library to Cursor, OpenCode, Codex, and Claude Code")
     sub = parser.add_subparsers(dest="command", required=True)
     for command in ("serve", "start"):
         p = sub.add_parser(command, help="Serve skills" + (" and offer local setup" if command == "start" else ""))
@@ -49,7 +49,8 @@ def main():
             p.add_argument("--config", type=Path, default=default_config())
     p = sub.add_parser("setup", help="Connect this user's harnesses to a running service")
     p.add_argument("--url", default="http://127.0.0.1:8765")
-    p.add_argument("--harness", choices=["cursor", "opencode", "both"])
+    p.add_argument("--harness", choices=HARNESS_CHOICES, action="append",
+                   help="Repeat to select multiple harnesses; both = Cursor + OpenCode; all = all four")
     p.add_argument("--interval", type=float, default=5)
     p.add_argument("--no-autostart", action="store_true")
     p.add_argument("--no-start", action="store_true")

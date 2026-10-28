@@ -8,6 +8,8 @@ import time
 
 from .client import atomic_json, lock, sync
 
+HARNESS_CHOICES = ("cursor", "opencode", "codex", "claude-code", "both", "all")
+
 
 def default_config():
     return Path.home() / ".config" / "skillhub" / "client.json"
@@ -15,13 +17,22 @@ def default_config():
 
 def targets(choice, home=None):
     home = Path(home) if home else Path.home()
-    result = []
-    if choice in ("cursor", "both"):
-        result.append(str(home / ".cursor" / "skills"))
-    if choice in ("opencode", "both"):
-        config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config")))
-        result.append(str(config_home / "opencode" / "skills"))
-    return result
+    choices = [choice] if isinstance(choice, str) else list(choice)
+    if not choices or any(item not in HARNESS_CHOICES for item in choices):
+        raise ValueError("Choose a supported harness: " + ", ".join(HARNESS_CHOICES))
+    selected = set(choices)
+    if "both" in selected:
+        selected.update(("cursor", "opencode"))
+    if "all" in selected:
+        selected.update(("cursor", "opencode", "codex", "claude-code"))
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config")))
+    paths = {
+        "cursor": home / ".cursor" / "skills",
+        "opencode": config_home / "opencode" / "skills",
+        "codex": home / ".agents" / "skills",
+        "claude-code": home / ".claude" / "skills",
+    }
+    return list(dict.fromkeys(str(path) for name, path in paths.items() if name in selected))
 
 
 def startup_path():
@@ -86,12 +97,14 @@ def stop_background(config):
 
 def configure(config, url, choice, interval, autostart=True, start=True):
     if not choice:
-        answer = input("Set up [1] Cursor, [2] OpenCode, [3] both, [0] server only: ").strip()
+        answer = input("Set up [1] Cursor, [2] OpenCode, [3] Cursor + OpenCode, "
+                       "[4] Codex, [5] Claude Code, [6] all, [0] server only: ").strip()
         if answer == "0":
             return
-        choice = {"1": "cursor", "2": "opencode", "3": "both"}.get(answer)
+        choice = {"1": "cursor", "2": "opencode", "3": "both",
+                  "4": "codex", "5": "claude-code", "6": "all"}.get(answer)
         if not choice:
-            raise ValueError("Choose 0, 1, 2, or 3")
+            raise ValueError("Choose 0, 1, 2, 3, 4, 5, or 6")
     from urllib.parse import urlsplit
     parsed = urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.query or parsed.fragment or parsed.username:
