@@ -73,6 +73,10 @@
   .tally div { text-align: right; }
   .tally b { display: block; font: 400 40px/1 var(--display); font-variant-numeric: lining-nums tabular-nums; }
   .tally span { font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .tally [aria-describedby] { position: relative; cursor: help; outline: none; }
+  .tally [aria-describedby] span { text-decoration: underline dotted; text-underline-offset: 3px; }
+  .tip { position: absolute; top: calc(100% + 10px); right: 0; z-index: 5; width: max-content; max-width: 240px; padding: 9px 12px; border-radius: 3px; background: var(--ink); color: var(--card); box-shadow: var(--shadow); font: 13px/1.45 var(--body); text-align: left; opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity .15s, transform .15s, visibility .15s; pointer-events: none; }
+  .tally [aria-describedby]:hover .tip, .tally [aria-describedby]:focus-visible .tip { opacity: 1; visibility: visible; transform: none; }
 
   /* Tabs + status */
   nav { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 30px 0 26px; flex-wrap: wrap; }
@@ -98,8 +102,8 @@
   .card {
     position: relative; text-align: left; border: 0; cursor: pointer; padding: 0; border-radius: 3px;
     background:
-      linear-gradient(var(--card), var(--card)) top / 100% 64px no-repeat,
-      repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule-blue) 25px 26px) 0 64px / 100% 100%,
+      linear-gradient(var(--card), var(--card)) top / 100% 82px no-repeat,
+      repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule-blue) 25px 26px) 0 82px / 100% 100%,
       var(--card);
     box-shadow: var(--shadow); min-height: 220px; display: flex; flex-direction: column;
     transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s;
@@ -112,7 +116,7 @@
   .card-head { height: 64px; padding: 14px 20px 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .card-name { font: 500 15px/1.3 var(--mono); overflow-wrap: anywhere; }
   .card-no { font: italic 400 13px/1 var(--display); color: var(--accent); white-space: nowrap; }
-  .card-desc { padding: 2px 20px 0; font: 400 16.5px/26px var(--display); color: var(--ink-soft); flex: 1; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-desc { padding: 0 20px; margin-top: 18px; font: 400 16.5px/26px var(--display); color: var(--ink-soft); flex: 1; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   .card-meta { padding: 16px 20px 36px; display: flex; gap: 16px; font: 400 11px/1 var(--mono); color: var(--muted); letter-spacing: .02em; }
   .empty { padding: 72px 20px; text-align: center; border: 1.5px dashed var(--rule); border-radius: 4px; color: var(--ink-soft); }
   .empty h3 { font: italic 400 28px/1.2 var(--display); margin: 0 0 8px; color: var(--ink); }
@@ -172,6 +176,45 @@
   .targets li { padding: 8px 0; border-bottom: 1px dotted var(--rule); overflow-wrap: anywhere; }
   .note { font-size: 13px; color: var(--muted); margin: 18px 0 0; line-height: 1.8; }
 
+  /* Drop zone */
+  .drop { margin-top: 34px; border: 1.5px dashed var(--rule); border-radius: 4px; padding: 34px 28px; display: grid; grid-template-columns: auto 1fr auto; gap: 26px; align-items: center; transition: border-color .2s, background .2s, transform .2s; }
+  .drop.over, body.dragging .drop { border-color: var(--accent); background: var(--accent-soft); }
+  .drop.busy { opacity: .6; pointer-events: none; }
+  .drop-icon { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; background: var(--paper-deep); color: var(--accent); transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+  .drop.over .drop-icon { transform: translateY(-4px) rotate(-8deg); }
+  .drop h3 { font: 400 26px/1.15 var(--display); margin: 0 0 4px; }
+  .drop h3 em { color: var(--accent); }
+  .drop p { margin: 0; color: var(--ink-soft); font-size: 14px; }
+  .drop .row { justify-content: flex-end; }
+  .veil { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(23,20,15,.55); backdrop-filter: blur(4px); pointer-events: none; opacity: 0; transition: opacity .15s; }
+  body.dragging .veil { opacity: 1; }
+  .veil div { border: 2px dashed var(--accent); border-radius: 8px; padding: 48px 64px; background: var(--card); text-align: center; box-shadow: 0 30px 80px -20px rgba(0,0,0,.5); }
+  .veil b { display: block; font: italic 400 40px/1.1 var(--display); color: var(--accent); }
+  .veil span { color: var(--ink-soft); }
+  .card.fresh { animation: deal .55s cubic-bezier(.2,.8,.2,1) forwards, glow 2.4s ease 1; }
+  @keyframes glow { 0%, 60% { box-shadow: 0 0 0 3px var(--accent), var(--shadow); } 100% { box-shadow: var(--shadow); } }
+
+  /* Logs */
+  .logbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .logbar .presets { margin: 0; }
+  .logpath { font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  .follow { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+  .follow input { accent-color: var(--accent); }
+  .log { height: 520px; overflow: auto; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); font: 12.5px/1.6 var(--mono); scroll-behavior: smooth; }
+  .log-row { display: grid; grid-template-columns: 74px 22px 1fr; gap: 8px; padding: 5px 4px; border-bottom: 1px dotted var(--rule); animation: deal .25s ease; }
+  .log-row:hover { background: var(--paper); }
+  .log-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .log-level { font-weight: 700; text-align: center; }
+  .log-msg { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+  .lv-INFO .log-level { color: #5b8fd6; }
+  .lv-SUCCESS .log-level { color: var(--ok); }
+  .lv-WARNING .log-level { color: var(--warn); }
+  .lv-ERROR .log-level, .lv-CRITICAL .log-level, .lv-ERROR .log-msg, .lv-CRITICAL .log-msg { color: var(--bad); }
+  .m-method { color: #a46cc4; font-weight: 600; margin-right: 6px; }
+  .m-s2 { color: var(--ok); font-weight: 600; } .m-s3 { color: #5b8fd6; font-weight: 600; } .m-s4 { color: var(--warn); font-weight: 600; } .m-s5 { color: var(--bad); font-weight: 600; }
+  .m-dim { color: var(--muted); margin-left: 6px; }
+  .log-empty { padding: 60px 0; text-align: center; color: var(--muted); font: italic 17px var(--display); }
+
   /* Reader */
   dialog { border: 0; padding: 0; background: var(--card); color: var(--ink); width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); border-radius: 4px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.5); }
   dialog::backdrop { background: rgba(23, 20, 15, .45); backdrop-filter: blur(3px); }
@@ -190,6 +233,7 @@
 
   [hidden] { display: none !important; }
   @media (max-width: 820px) {
+    .drop { grid-template-columns: 1fr; text-align: center; justify-items: center; }
     .settings { grid-template-columns: 1fr; }
     .tally { gap: 22px; }
     .dirs li { grid-template-columns: 1fr auto; }
@@ -207,8 +251,8 @@
     <div class="masthead">
       <h1>Skill<em>Hub</em></h1>
       <div class="tally">
-        <div><b id="count-skills">–</b><span>Skills</span></div>
-        <div><b id="count-files">–</b><span>Files</span></div>
+        <div tabindex="0" aria-describedby="tip-skills"><b id="count-skills">–</b><span>Skills</span><small class="tip" id="tip-skills" role="tooltip">Skills in the library. Each skill is one folder with a SKILL.md.</small></div>
+        <div tabindex="0" aria-describedby="tip-files"><b id="count-files">–</b><span>Files</span><small class="tip" id="tip-files" role="tooltip">Files across all skills, counting each SKILL.md plus any references or scripts.</small></div>
         <div id="tally-projects" hidden><b id="count-projects">–</b><span>Projects</span></div>
       </div>
     </div>
@@ -218,6 +262,7 @@
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-tab="library">Library</button>
       <button role="tab" aria-selected="false" data-tab="settings" id="settings-tab" hidden>Settings</button>
+      <button role="tab" aria-selected="false" data-tab="logs" id="logs-tab" hidden>Logs</button>
     </div>
     <div class="pulse" id="pulse" hidden><span class="dot" id="pulse-dot"></span><span id="pulse-text"></span></div>
   </nav>
@@ -232,6 +277,19 @@
     </div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty" hidden></div>
+    <section class="drop" id="drop" hidden aria-label="Add skills">
+      <div class="drop-icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg></div>
+      <div>
+        <h3>File a <em>new skill</em></h3>
+        <p>Drop a skill folder, a <code>.zip</code>, or a single <code>SKILL.md</code> anywhere on this page. It's checked before it joins the library, and connected computers receive it on their next sync.</p>
+      </div>
+      <div class="row">
+        <button class="btn ghost" type="button" id="pick-folder">Choose folder</button>
+        <button class="btn" type="button" id="pick-file">Choose file</button>
+      </div>
+      <input type="file" id="folder-input" webkitdirectory multiple hidden>
+      <input type="file" id="file-input" accept=".zip,.md" multiple hidden>
+    </section>
   </section>
 
   <section id="settings" role="tabpanel" hidden>
@@ -283,7 +341,21 @@
       </div>
     </div>
   </section>
+  <section id="logs" role="tabpanel" hidden>
+    <div class="panel wide">
+      <h2>Activity <em>log</em></h2>
+      <p>Live output from the running SkillHub processes, newest at the bottom.</p>
+      <div class="logbar">
+        <div class="presets" id="log-sources"></div>
+        <label class="follow"><input type="checkbox" id="log-follow" checked> Follow new lines</label>
+      </div>
+      <div class="log" id="log" role="log" aria-live="off"></div>
+      <p class="logpath" id="log-path"></p>
+    </div>
+  </section>
 </div>
+
+<div class="veil" aria-hidden="true"><div><b>Drop to file it</b><span>Skill folders, .zip archives, or SKILL.md</span></div></div>
 
 <dialog id="reader">
   <div class="reader-head">
@@ -304,7 +376,8 @@
 const HARNESS = { cursor: "Cursor", opencode: "OpenCode", codex: "Codex", "claude-code": "Claude Code" };
 const PRESETS = [[5, "5s"], [30, "30s"], [60, "1m"], [300, "5m"], [900, "15m"], [3600, "1h"]];
 const $ = (id) => document.getElementById(id);
-const state = { data: null, token: localStorage.getItem("skillhub-token") || "", rendered: "" };
+const state = { data: null, token: localStorage.getItem("skillhub-token") || "", rendered: "", fresh: new Set(),
+  logs: { source: null, server: [], last: 0, client: null, timer: null } };
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -383,6 +456,8 @@ function render() {
   $("catalog-error").querySelector("span").textContent = data.error || "";
   renderLibrary();
   renderClient();
+  $("drop").hidden = !data.can_upload;
+  $("logs-tab").hidden = !data.can_view_logs;
 }
 
 function renderLibrary() {
@@ -405,6 +480,7 @@ function renderLibrary() {
         el("span", { title: "Content version" }, "#" + skill.version.slice(0, 7))),
       el("span", { class: "hole", "aria-hidden": "true" }));
     card.style.animationDelay = first ? `${Math.min(index, 12) * 45}ms` : "0ms";
+    if (state.fresh.has(skill.name)) card.classList.add("fresh");
     return card;
   }));
   const empty = $("empty");
@@ -549,18 +625,187 @@ $("sync-now").addEventListener("click", async (event) => {
 
 document.querySelectorAll("[data-tab]").forEach((tab) => tab.addEventListener("click", () => {
   document.querySelectorAll("[data-tab]").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
-  $("library").hidden = tab.dataset.tab !== "library";
-  $("settings").hidden = tab.dataset.tab !== "settings";
+  for (const name of ["library", "settings", "logs"]) $(name).hidden = tab.dataset.tab !== name;
   history.replaceState(null, "", "#" + tab.dataset.tab);
+  if (tab.dataset.tab === "logs") startLogs(); else stopLogs();
 }));
 $("search").addEventListener("input", renderLibrary);
 $("reader-close").addEventListener("click", () => $("reader").close());
 $("reader").addEventListener("click", (event) => { if (event.target === $("reader")) $("reader").close(); });
 
 refresh().then(() => {
-  if (location.hash === "#settings" && !$("settings-tab").hidden) $("settings-tab").click();
+  const tab = document.querySelector(`[data-tab="${location.hash.slice(1)}"]`);
+  if (tab && !tab.hidden) tab.click();
 });
 setInterval(() => { if (!document.hidden) refresh(); }, 4000);
+
+/* ---------- Logs ---------- */
+const LEVEL_MARK = { INFO: "●", SUCCESS: "✓", WARNING: "▲", ERROR: "✗", CRITICAL: "✗", DEBUG: "·" };
+
+function startLogs() {
+  if (state.logs.timer) return;
+  pollLogs();
+  state.logs.timer = setInterval(() => { if (!document.hidden) pollLogs(); }, 2000);
+}
+function stopLogs() {
+  clearInterval(state.logs.timer);
+  state.logs.timer = null;
+}
+
+async function pollLogs() {
+  const logs = state.logs;
+  let result;
+  try {
+    result = await api("/api/logs?since=" + logs.last);
+  } catch (error) {
+    return;
+  }
+  logs.server = logs.server.concat(result.server.entries).slice(-500);
+  logs.last = result.server.last;
+  logs.client = result.client;
+  if (!logs.source) logs.source = result.client ? "client" : "server";
+  renderLogs();
+}
+
+function logSources() {
+  const sources = [["server", "This server"]];
+  if (state.logs.client) sources.unshift(["client", "Background sync"]);
+  return sources;
+}
+
+function renderLogs() {
+  const logs = state.logs;
+  $("log-sources").replaceChildren(...logSources().map(([key, label]) => el("button", {
+    class: "chip", type: "button", "aria-pressed": String(logs.source === key),
+    onclick: () => { logs.source = key; logs.shown = null; renderLogs(); },
+  }, label)));
+  const entries = logs.source === "client" ? logs.client.entries : logs.server;
+  $("log-path").textContent = logs.source === "client" ? "Reading " + logs.client.path
+    : "Recent activity held in memory by the server process (requests, uploads, warnings).";
+  const signature = logs.source + ":" + entries.length + ":" + (entries.at(-1)?.message || "") + (entries.at(-1)?.stamp || entries.at(-1)?.seq || "");
+  if (signature === logs.shown) return;
+  logs.shown = signature;
+  const box = $("log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  if (!entries.length) {
+    box.replaceChildren(el("div", { class: "log-empty" }, logs.source === "client"
+      ? "The background sync hasn't written anything yet." : "Nothing yet — activity appears here as it happens."));
+    return;
+  }
+  box.replaceChildren(...entries.map(logRow));
+  if ($("log-follow").checked || atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function logRow(entry) {
+  const time = entry.stamp ? entry.stamp.slice(11) : new Date(entry.time * 1000).toLocaleTimeString([], { hour12: false });
+  const level = /updated \d+ skill folder/i.test(entry.message) ? "SUCCESS" : entry.level;
+  let message;
+  if (entry.http) {
+    const [method, path, status, client] = entry.http;
+    message = el("span", { class: "log-msg" }, el("span", { class: "m-method" }, method), path, " ",
+      el("span", { class: "m-s" + String(status)[0] }, String(status)), el("span", { class: "m-dim" }, client));
+  } else {
+    message = el("span", { class: "log-msg" }, entry.message);
+  }
+  return el("div", { class: "log-row lv-" + level },
+    el("span", { class: "log-time" }, time),
+    el("span", { class: "log-level", title: level }, LEVEL_MARK[level] || "●"),
+    message);
+}
+
+/* ---------- Drop zone ---------- */
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function walk(entry, out) {
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    out.push({ path: entry.fullPath.replace(/^\/+/, ""), file });
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    for (;;) {
+      const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+      if (!batch.length) break;
+      for (const child of batch) await walk(child, out);
+    }
+  }
+}
+
+async function upload(items, replace = false) {
+  if (!items.length) return;
+  const zone = $("drop");
+  zone.classList.add("busy");
+  try {
+    const files = await Promise.all(items.map(async ({ path, file }) => ({ path, data: await readAsBase64(file) })));
+    try {
+      const result = await api("/api/library", { method: "POST", body: { files, replace } });
+      result.added.forEach((name) => state.fresh.add(name));
+      setTimeout(() => result.added.forEach((name) => state.fresh.delete(name)), 3000);
+      toast(`Filed ${result.added.join(", ")} — connected computers pick it up on their next sync`);
+      state.rendered = "";
+      await refresh();
+    } catch (error) {
+      if (/Already in the library/.test(error.message) && !replace) {
+        const names = error.message.split(": ").slice(1).join(": ");
+        if (confirm(`Replace ${names} with the version you dropped? The current files will be overwritten.`)) {
+          zone.classList.remove("busy");
+          return upload(items, true);
+        }
+      } else {
+        toast(error.message, true);
+      }
+    }
+  } catch (error) {
+    toast("Could not read the dropped files: " + error.message, true);
+  } finally {
+    zone.classList.remove("busy");
+  }
+}
+
+let dragDepth = 0;
+const draggingFiles = (event) => state.data?.can_upload && [...(event.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  dragDepth++;
+  document.body.classList.add("dragging");
+});
+document.addEventListener("dragover", (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+document.addEventListener("dragleave", (event) => {
+  if (!draggingFiles(event)) return;
+  if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); }
+});
+document.addEventListener("drop", async (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("dragging");
+  const entries = [...event.dataTransfer.items].map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  const items = [];
+  if (entries.length) for (const entry of entries) await walk(entry, items);
+  else for (const file of event.dataTransfer.files) items.push({ path: file.name, file });
+  if (!$("library").hidden || confirm("Add the dropped files to the skill library?")) upload(items);
+});
+$("pick-folder").addEventListener("click", () => $("folder-input").click());
+$("pick-file").addEventListener("click", () => $("file-input").click());
+$("folder-input").addEventListener("change", (event) => {
+  upload([...event.target.files].map((file) => ({ path: file.webkitRelativePath || file.name, file })));
+  event.target.value = "";
+});
+$("file-input").addEventListener("change", (event) => {
+  upload([...event.target.files].map((file) => ({ path: file.name, file })));
+  event.target.value = "";
+});
 </script>
 </body>
 </html>
