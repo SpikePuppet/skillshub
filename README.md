@@ -4,7 +4,7 @@ A Python service that turns a directory of skills into a shared library for **Cu
 
 ## Start locally
 
-Requires Python 3.11+ and Git. From your clone:
+Requires Python 3.11+ and Git, plus internet access for the initial dependency installation. On macOS/Linux, `python3` must be Python 3.11+; on Windows, `python` must be Python 3.11+. From the repository root of your clone:
 
 ```sh
 ./scripts/start.sh
@@ -16,7 +16,7 @@ On Windows, from PowerShell:
 ./scripts/start.ps1
 ```
 
-The script creates `.venv`, installs the project, starts the service at `http://127.0.0.1:8765`, and on first launch asks whether to set up **Cursor, OpenCode, Codex, Claude Code, all four, or server only** (the existing Cursor + OpenCode option is also available). Selecting a harness downloads skills immediately and starts a background sync process. Open the harness and use the installed `example-review` skill.
+The script creates `.venv`, installs the project, starts the service at `http://127.0.0.1:8765`, and, when no client config exists, asks whether to set up **Cursor, OpenCode, Codex, Claude Code, all four, or server only** (the existing Cursor + OpenCode option is also available). Selecting a harness downloads skills immediately and starts a background sync process. Open the harness and use the installed `example-review` skill. Keep this terminal open: after the initial sync finishes, the server continues running in the foreground. Press **Ctrl+C** to stop the server; the background sync client is a separate process. Choosing **server only** does not save a client config, so the setup menu appears again on the next `start`.
 
 Setup writes skills to the selected harness's global directory:
 
@@ -25,7 +25,7 @@ Setup writes skills to the selected harness's global directory:
 - Codex: `~/.agents/skills/<name>/`
 - Claude Code: `~/.claude/skills/<name>/`
 
-Choose adapters individually, combine them by repeating `--harness`, or select all four:
+With the server still running, open a second terminal in the repository root to change the selected harnesses. Choose adapters individually, combine them by repeating `--harness`, or select all four:
 
 ```sh
 ./scripts/setup.sh --harness codex
@@ -38,6 +38,56 @@ The same flags work with `scripts/setup.ps1` and `skillhub setup`. `--harness bo
 
 The client polls every five seconds. It runs independently of the harness, so files are ready when the harness opens. Harness discovery and conversational context are controlled by the harness itself: **start a new session or reload the harness if a running session does not pick up a new skill**. This project does not promise hot injection into an existing conversation. Skills provide instructions; they do not install tools or runtime dependencies referenced by those instructions.
 
+## Restart later, after the first sync
+
+For the usual local setup, reopen a terminal, change to your clone, and run:
+
+```sh
+cd /path/to/SkillHub
+./scripts/start.sh
+```
+
+On Windows, from PowerShell:
+
+```powershell
+cd C:\path\to\SkillHub
+./scripts/start.ps1
+```
+
+Replace the example path with your actual clone location. With an existing client config, `start` skips the setup menu, starts the server, and ensures the background watcher is running. The watcher resumes using its saved service URL, harness targets, and project list. Leave the terminal open for ongoing delivery; restarting the server does not require another setup or manual sync. If you originally used a custom config, append `--config /path/to/client.json` to `start`, `status`, and `sync`. Reuse any custom `--host`, `--port`, and `--skills` options when starting the server.
+
+For a quick **server-only restart** after bootstrap, use the installed executable directly. This skips installation and the setup prompt, and does not start a stopped client watcher:
+
+```sh
+cd /path/to/SkillHub
+.venv/bin/skillhub serve --host 127.0.0.1 --port 8765 --skills ./skills
+```
+
+Windows equivalent:
+
+```powershell
+cd C:\path\to\SkillHub
+.venv/Scripts/skillhub.exe serve --host 127.0.0.1 --port 8765 --skills ./skills
+```
+
+- `serve` runs the server in this terminal until **Ctrl+C**.
+- `--host 127.0.0.1` limits access to this machine. For a shared server, reuse `--host 0.0.0.0` and have clients connect to its reachable hostname or IP.
+- `--port 8765` must match the saved client URL. Reuse any custom port from the original setup.
+- `--skills ./skills` is relative to the current directory. Reuse your original skill directory, or supply its absolute path.
+
+If you used bearer authentication, set the same `SKILLHUB_TOKEN` again in the server terminal before starting it (`export SKILLHUB_TOKEN='your-shared-token'` on Unix; `$env:SKILLHUB_TOKEN = 'your-shared-token'` in PowerShell). The server does not read the token from the client config.
+
+To check the restart, open a second terminal in the clone and run:
+
+```sh
+.venv/bin/skillhub status   # Saved URL/targets and whether the client watcher is running
+.venv/bin/skillhub sync     # Verify delivery from the configured server immediately
+```
+
+On Windows, substitute `.venv/Scripts/skillhub.exe`. `status` checks the client, not server health; `sync` needs an existing client config and a reachable server. For server-only setups, check `http://127.0.0.1:8765/healthz` (with a bearer header if authentication is enabled).
+
+If startup reports **address already in use**, an existing process is using that port; stop the previous SkillHub server in its terminal before starting another. If sync reports a connection error, check the saved URL with `status`, then confirm that server is running and reachable. `start` preserves an existing config even if it points to a remote server; to change the URL, rerun `setup --url ... --harness ...` with your intended harness selection. If `.venv` is missing, run the bootstrap script before using the direct executable. If you moved the clone, remove the old `.venv` and recreate it with bootstrap because virtual environments contain absolute paths.
+
 ## Share one service with multiple users
 
 On the service machine, bootstrap once and run the noninteractive server:
@@ -47,7 +97,9 @@ On the service machine, bootstrap once and run the noninteractive server:
 .venv/bin/skillhub serve --host 0.0.0.0 --port 8765 --skills ./skills
 ```
 
-Each user clones this repository onto their own machine and runs:
+On Windows, bootstrap with `./scripts/bootstrap.ps1`, then run `.venv/Scripts/skillhub.exe serve --host 0.0.0.0 --port 8765 --skills ./skills`.
+
+Keep the server running while each user clones this repository onto their own machine and runs:
 
 ```sh
 ./scripts/setup.sh --url http://YOUR-SERVER:8765
@@ -100,7 +152,7 @@ Your instructions here. Reference supporting files using relative paths.
 
 The name must match the folder, use lowercase letters/digits separated by single hyphens, and be at most 64 characters. Descriptions must be 1–1024 characters. Additional frontmatter is preserved. Supporting files and Unix executable bits are preserved; hidden files are excluded and symlinks are rejected. Catalogs are limited to 64 MiB and 4096 files.
 
-Validate before moving a new skill into the shared directory:
+Validate the complete shared directory after changes (use `--skills /path/to/staging` to validate a staging directory before moving its skill folders into `skills/`):
 
 ```sh
 .venv/bin/skillhub validate --skills ./skills
@@ -120,12 +172,12 @@ skillhub sync                         # Fetch immediately
 skillhub watch                        # Foreground client (also suitable for a service manager)
 skillhub stop                         # Stop the current background client
 skillhub stop --disable-autostart     # Also remove login startup
-skillhub setup --harness both         # Configure/start again
+skillhub setup --harness both         # Select Cursor + OpenCode and start syncing
 ```
 
 Use the full virtual-environment path unless it is activated. Configuration defaults to `~/.config/skillhub/client.json`; logs are alongside it in `client.log`. `--config PATH` is available on client commands. One configured service per client config is supported. Use a stable service URL: ownership is tied to that URL.
 
-Login startup uses a LaunchAgent on macOS, XDG desktop autostart on Linux, and the Startup folder on Windows. Linux desktop startup requires a graphical login; for a headless Linux client, supervise `skillhub watch` with your service manager instead. Setup starts the client immediately in all cases. `--no-autostart` skips login startup; `--no-start` skips the background process. `--interval SECONDS` controls polling. Startup registration is per user, with one standard startup entry; custom configs do not create multiple login jobs.
+Login startup uses a LaunchAgent on macOS, XDG desktop autostart on Linux, and the Startup folder on Windows. Linux desktop startup requires a graphical login; for a headless Linux client, supervise `skillhub watch` with your service manager instead. By default, setup starts the client immediately on all three platforms. `--no-autostart` skips login startup; `--no-start` skips the background process. Both flags still perform the initial sync, so setup requires a running server; combine them to perform setup without login startup or a background watcher. `--interval SECONDS` controls polling. Startup registration is per user, with one standard startup entry; custom configs do not create multiple login jobs.
 
 Stopping the server or losing connectivity leaves the last downloaded skills usable. The client retries and logs failures. Sync validates the complete archive before installation, preflights conflicts across all selected targets, stages each skill on its destination filesystem, and recovers interrupted folder replacements. Replacement is per skill; it is not a transaction spanning all skills/harnesses. There can be a brief directory-swap gap. Local concurrent edits during a sync are not supported.
 
@@ -140,7 +192,7 @@ Keep a separate, per-user list of projects that should receive the shared librar
 .venv/bin/skillhub projects remove ~/Code/my-project
 ```
 
-On Windows, use `.venv/Scripts/skillhub.exe`. Omit `--harness` to select all four tools. Adding an existing project replaces its harness selection. Paths supplied to the command can be relative; the list stores absolute paths. Project directories must already exist. No projects are opted in automatically.
+Run these commands after client setup, with the server running for `sync`. On Windows, use `.venv/Scripts/skillhub.exe`. Omit `--harness` to select all four tools. Adding an existing project replaces its harness selection. Paths supplied to the command can be relative; the list stores absolute paths. Project directories must already exist. No projects are opted in automatically.
 
 The list lives in `~/.config/skillhub/projects.json`, separately from `client.json`. With `--config PATH` (placed after `projects add`, `list`, or `remove`), it lives beside that client config. Configs in the same directory share the list and sync lock. You can also edit the list directly:
 
